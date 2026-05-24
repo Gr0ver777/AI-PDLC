@@ -1,6 +1,8 @@
 param(
-    [string]$FeatureName = "client-support-plan",
-    [string]$FeatureBranch = "codex/pdlc-client-support-plan",
+    [ValidateSet("client-support-plan", "sla-indicators")]
+    [string]$Profile = "client-support-plan",
+    [string]$FeatureName = "",
+    [string]$FeatureBranch = "",
     [string]$BaseBranch = "main",
     [switch]$RepairGitAcl,
     [switch]$UseIsolatedGitWorkspace,
@@ -18,6 +20,51 @@ function Write-Step {
     param([string]$Message)
     Write-Host ""
     Write-Host "==> $Message" -ForegroundColor Cyan
+}
+
+function Get-FlowProfile {
+    param([string]$Name)
+    switch ($Name) {
+        "sla-indicators" {
+            return @{
+                FeatureName = "sla-indicators"
+                FeatureBranch = "codex/pdlc-sla-indicators"
+                PrTitle = "PDLC: SLA indicators"
+                PrBody = "Automated PDLC flow: SLA requirements, QA review, manual test case, frontend implementation, and UI automated coverage."
+                Stages = @(
+                    @{ Message = "docs: add sla indicators requirements"; Paths = @("docs/requirements/ui-sla-indicators.md") },
+                    @{ Message = "docs: add qa review for sla indicators"; Paths = @("docs/qa-reviews/ui-sla-indicators-review.md") },
+                    @{ Message = "feat: add sla indicators ui"; Paths = @("frontend/src/App.tsx", "frontend/src/App.css") },
+                    @{ Message = "test: add manual case for sla indicators"; Paths = @("tests/manual/ui-sla-indicators.md", "docs/test-runs/ui-sla-indicators-manual.md") },
+                    @{ Message = "test: add automated ui coverage for sla indicators"; Paths = @("tests/ui") },
+                    @{ Message = "chore: generalize pdlc flow runner"; Paths = @("scripts/pdlc_flow.ps1", "docs/pdlc-workflows/automated-flow.md") }
+                )
+            }
+        }
+        default {
+            return @{
+                FeatureName = "client-support-plan"
+                FeatureBranch = "codex/pdlc-client-support-plan"
+                PrTitle = "PDLC: client support plan"
+                PrBody = "Automated PDLC flow: requirements, QA review, manual test case, frontend implementation, and UI automated coverage."
+                Stages = @(
+                    @{ Message = "docs: add client support plan requirements"; Paths = @("docs/requirements/ui-client-support-plan.md") },
+                    @{ Message = "docs: add qa review workflow and requirements review"; Paths = @("docs/pdlc-workflows", "docs/qa-reviews") },
+                    @{ Message = "test: add manual case for client support plan"; Paths = @("tests/manual", "docs/test-runs") },
+                    @{ Message = "feat: add client support plan ui"; Paths = @("frontend/src/App.tsx", "frontend/src/App.css") },
+                    @{ Message = "test: add automated ui coverage for client support plan"; Paths = @("tests/ui") }
+                )
+            }
+        }
+    }
+}
+
+$Flow = Get-FlowProfile $Profile
+if (-not $FeatureName) {
+    $FeatureName = $Flow.FeatureName
+}
+if (-not $FeatureBranch) {
+    $FeatureBranch = $Flow.FeatureBranch
 }
 
 function Invoke-Checked {
@@ -46,9 +93,38 @@ function Invoke-Git {
     & git -c "safe.directory=$GitSafeDirectory" @Arguments
 }
 
-function Git-Command {
-    param([string]$Arguments)
-    return "git -c safe.directory=`"$GitSafeDirectory`" $Arguments"
+function Invoke-GitChecked {
+    param([string[]]$Arguments)
+    Write-Host "PS> git -c safe.directory=`"$GitSafeDirectory`" $($Arguments -join ' ')" -ForegroundColor DarkGray
+    if ($DryRun) {
+        return
+    }
+    & git -c "safe.directory=$GitSafeDirectory" @Arguments
+    if ($LASTEXITCODE -ne 0) {
+        throw "Git command failed with exit code $LASTEXITCODE`: git $($Arguments -join ' ')"
+    }
+}
+
+function Invoke-NativeChecked {
+    param(
+        [string]$FilePath,
+        [string[]]$Arguments,
+        [string]$WorkingDirectory = (Get-Location).Path
+    )
+    Write-Host "PS> $FilePath $($Arguments -join ' ')" -ForegroundColor DarkGray
+    if ($DryRun) {
+        return
+    }
+    Push-Location $WorkingDirectory
+    try {
+        & $FilePath @Arguments
+        if ($LASTEXITCODE -ne 0) {
+            throw "Command failed with exit code $LASTEXITCODE`: $FilePath $($Arguments -join ' ')"
+        }
+    }
+    finally {
+        Pop-Location
+    }
 }
 
 function Test-GitWriteAccess {
@@ -82,15 +158,19 @@ function Invoke-IsolatedGitWorkspace {
     if (Test-Path -LiteralPath $isolatedRoot) {
         Remove-Item -LiteralPath $isolatedRoot -Recurse -Force
     }
-    New-Item -ItemType Directory -Path $isolatedRoot | Out-Null
+    $sourceGitUrl = "file:///" + ($sourceRoot.Replace("\", "/").Replace(" ", "%20"))
+    $gitExecPath = (& git --exec-path).Trim()
+    $uploadPack = Join-Path $gitExecPath "git-upload-pack.exe"
+    if ($uploadPack -like "C:\Program Files\Git\mingw64\*") {
+        $uploadPack = $uploadPack.Replace("C:\Program Files\Git\mingw64", "/mingw64").Replace("\", "/")
+    }
 
-    Write-Step "Initialize isolated Git repository"
-    Invoke-Checked "git init" $isolatedRoot
-    Invoke-Checked "git remote add origin `"$remote`"" $isolatedRoot
-    Invoke-Checked "git config user.name `"AI-PDLC Bot`"" $isolatedRoot
-    Invoke-Checked "git config user.email `"ai-pdlc-bot@example.local`"" $isolatedRoot
-    Invoke-Checked "git fetch origin $BaseBranch --depth=1" $isolatedRoot
-    Invoke-Checked "git checkout -B $FeatureBranch FETCH_HEAD" $isolatedRoot
+    Write-Step "Clone local base branch into isolated Git repository"
+    Invoke-NativeChecked "git" @("clone", "--upload-pack", $uploadPack, "--no-hardlinks", "--branch", $BaseBranch, $sourceGitUrl, $isolatedRoot)
+    Invoke-NativeChecked "git" @("remote", "set-url", "origin", $remote) $isolatedRoot
+    Invoke-NativeChecked "git" @("config", "user.name", "AI-PDLC Bot") $isolatedRoot
+    Invoke-NativeChecked "git" @("config", "user.email", "ai-pdlc-bot@example.local") $isolatedRoot
+    Invoke-NativeChecked "git" @("checkout", "-B", $FeatureBranch) $isolatedRoot
 
     $excludeDirs = @(
         ".git", ".pdlc-run", ".pw-browsers", ".venv", ".npm-cache", ".python-packages",
@@ -115,7 +195,7 @@ function Invoke-IsolatedGitWorkspace {
     }
 
     Write-Step "Run PDLC flow inside isolated workspace"
-    Invoke-Checked "powershell -NoProfile -ExecutionPolicy Bypass -File .\scripts\pdlc_flow.ps1 -FeatureName `"$FeatureName`" -FeatureBranch `"$FeatureBranch`" -BaseBranch `"$BaseBranch`" -SkipChecks $(if ($SkipPush) { '-SkipPush' }) $(if ($SkipPr) { '-SkipPr' })" $isolatedRoot
+    Invoke-Checked "powershell -NoProfile -ExecutionPolicy Bypass -File .\scripts\pdlc_flow.ps1 -Profile `"$Profile`" -FeatureName `"$FeatureName`" -FeatureBranch `"$FeatureBranch`" -BaseBranch `"$BaseBranch`" -SkipChecks $(if ($SkipPush) { '-SkipPush' }) $(if ($SkipPr) { '-SkipPr' })" $isolatedRoot
 }
 
 function Assert-NoForbiddenTrackedFiles {
@@ -159,10 +239,10 @@ function Ensure-Branch {
     }
     $exists = Invoke-Git @("branch", "--list", $FeatureBranch)
     if ($exists) {
-        Invoke-Checked (Git-Command "switch $FeatureBranch")
+        Invoke-GitChecked @("switch", $FeatureBranch)
     }
     else {
-        Invoke-Checked (Git-Command "switch -c $FeatureBranch")
+        Invoke-GitChecked @("switch", "-c", $FeatureBranch)
     }
 }
 
@@ -176,7 +256,7 @@ function Commit-Stage {
 
     foreach ($path in $Paths) {
         if (Test-Path -LiteralPath $path) {
-            Invoke-Checked (Git-Command "add -- `"$path`"")
+            Invoke-GitChecked @("add", "--", $path)
         }
         else {
             Write-Host "Skip missing path: $path" -ForegroundColor Yellow
@@ -189,7 +269,7 @@ function Commit-Stage {
         return
     }
 
-    Invoke-Checked (Git-Command "commit -m `"$Message`"")
+    Invoke-GitChecked @("commit", "-m", $Message)
     Invoke-Git @("log", "--oneline", "-1")
 }
 
@@ -214,7 +294,7 @@ function Push-Branch {
         return
     }
     Write-Step "Push feature branch"
-    Invoke-Checked (Git-Command "push -u origin $FeatureBranch")
+    Invoke-GitChecked @("push", "-u", "origin", $FeatureBranch)
 }
 
 function Create-PullRequest {
@@ -240,10 +320,10 @@ function Create-PullRequest {
 
     Write-Step "Create pull request"
     $body = @{
-        title = "PDLC: client support plan"
+        title = $Flow.PrTitle
         head  = $FeatureBranch
         base  = $BaseBranch
-        body  = "Automated PDLC flow: requirements, QA review, manual test case, frontend implementation, and UI automated coverage."
+        body  = $Flow.PrBody
     } | ConvertTo-Json
 
     $headers = @{
@@ -289,28 +369,9 @@ if (-not $SkipChecks) {
     Run-Checks
 }
 
-Commit-Stage "docs: add client support plan requirements" @(
-    "docs/requirements/ui-client-support-plan.md"
-)
-
-Commit-Stage "docs: add qa review workflow and requirements review" @(
-    "docs/pdlc-workflows",
-    "docs/qa-reviews"
-)
-
-Commit-Stage "test: add manual case for client support plan" @(
-    "tests/manual",
-    "docs/test-runs"
-)
-
-Commit-Stage "feat: add client support plan ui" @(
-    "frontend/src/App.tsx",
-    "frontend/src/App.css"
-)
-
-Commit-Stage "test: add automated ui coverage for client support plan" @(
-    "tests/ui"
-)
+foreach ($stage in $Flow.Stages) {
+    Commit-Stage $stage.Message $stage.Paths
+}
 
 if (-not $SkipChecks) {
     Run-Checks

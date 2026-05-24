@@ -1,4 +1,5 @@
 from dataclasses import dataclass
+from datetime import date, timedelta
 
 
 @dataclass(frozen=True)
@@ -8,6 +9,14 @@ class SupportPlanData:
     contact_channel: str = "Телефон"
     document_package_status: str = "Запрошен"
     support_comment: str = "Согласовать дату звонка и проверить комплектность документов"
+
+
+@dataclass(frozen=True)
+class SlaPlanData:
+    processing_deadline: str = (date.today() + timedelta(days=2)).isoformat()
+    urgency: str = "Повышенная"
+    sla_comment: str = "Проконтролировать контакт до дедлайна"
+    expected_status: str = "Под контролем"
 
 
 @dataclass(frozen=True)
@@ -21,6 +30,7 @@ class RestructuringData:
     new_interest_rate: str = "11.5"
     hardship_reason: str = "Снижение выручки"
     support_plan: SupportPlanData = SupportPlanData()
+    sla_plan: SlaPlanData = SlaPlanData()
 
 
 @dataclass(frozen=True)
