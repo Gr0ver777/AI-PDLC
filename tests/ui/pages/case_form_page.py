@@ -1,6 +1,6 @@
 from playwright.sync_api import expect
 
-from tests.ui.factories.case_data_factory import BankruptcyData, RestructuringData, SupportPlanData
+from tests.ui.factories.case_data_factory import BankruptcyData, RestructuringData, SlaPlanData, SupportPlanData
 from tests.ui.pages.base_page import BasePage
 
 
@@ -34,6 +34,27 @@ class CaseFormPage(BasePage):
         expect(self.page.get_by_label("Дата следующего контакта")).to_have_js_property("validity.valid", False)
         expect(self.page.get_by_label("Ответственный менеджер")).to_have_js_property("validity.valid", False)
 
+    def expect_sla_fields(self) -> None:
+        expect(self.page.get_by_text("SLA обработки")).to_be_visible()
+        expect(self.page.get_by_label("Дедлайн обработки")).to_be_visible()
+        expect(self.page.get_by_label("Срочность")).to_be_visible()
+        expect(self.page.get_by_label("Комментарий по SLA")).to_be_visible()
+        expect(self.page.get_by_text("SLA-статус")).to_be_visible()
+
+    def fill_sla_plan(self, data: SlaPlanData) -> None:
+        self.page.get_by_label("Дедлайн обработки").fill(data.processing_deadline)
+        self.page.get_by_label("Срочность").select_option(label=data.urgency)
+        self.page.get_by_label("Комментарий по SLA").fill(data.sla_comment)
+
+    def clear_required_sla_fields(self) -> None:
+        self.page.get_by_label("Дедлайн обработки").fill("")
+
+    def expect_sla_validation(self) -> None:
+        expect(self.page.get_by_label("Дедлайн обработки")).to_have_js_property("validity.valid", False)
+
+    def expect_sla_status(self, status: str) -> None:
+        expect(self.page.locator(".sla-status").get_by_text(status)).to_be_visible()
+
     def submit(self) -> None:
         self.page.get_by_role("button", name="Создать заявку").click()
         expect(self.page.locator("h1").filter(has_text="Заявка #")).to_be_visible()
@@ -46,6 +67,7 @@ class CaseFormPage(BasePage):
         self.page.get_by_label("Новая ставка, %").fill(data.new_interest_rate)
         self.page.get_by_label("Причина ухудшения платежеспособности").fill(data.hardship_reason)
         self.fill_support_plan(data.support_plan)
+        self.fill_sla_plan(data.sla_plan)
         self.submit()
 
     def create_bankruptcy(self, data: BankruptcyData) -> None:
