@@ -66,6 +66,9 @@ if (-not $FeatureName) {
 if (-not $FeatureBranch) {
     $FeatureBranch = $Flow.FeatureBranch
 }
+if ($FeatureBranch -eq $BaseBranch) {
+    throw "FeatureBranch must be different from BaseBranch. New PDLC functionality must start in a dedicated feature branch."
+}
 
 function Invoke-Checked {
     param(
