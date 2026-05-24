@@ -1,0 +1,401 @@
+import { useCallback, useEffect, useMemo, useState } from 'react'
+import type { FormEvent, ReactNode } from 'react'
+import './App.css'
+
+const API_URL = import.meta.env.VITE_API_URL ?? 'http://localhost:8080/api'
+
+type CaseModule = 'RESTRUCTURING' | 'BANKRUPTCY'
+type CaseStatus = 'IN_REVIEW' | 'APPROVED' | 'NEEDS_MORE_INFO' | 'ESCALATED'
+type RiskLevel = 'LOW' | 'MEDIUM' | 'HIGH'
+type OperatorDecision = 'APPROVE' | 'REQUEST_INFO' | 'ESCALATE'
+
+type AssetCase = {
+  id: number
+  clientName: string
+  clientId: string
+  debtAmount: number
+  overdueDays: number
+  collateral: boolean
+  module: CaseModule
+  status: CaseStatus
+  riskLevel: RiskLevel
+  priority: 'NORMAL' | 'URGENT' | 'CRITICAL'
+  recommendation: string
+  createdAt: string
+  newPaymentSchedule?: string
+  restructuringTermMonths?: number
+  newInterestRate?: number
+  hardshipReason?: string
+  bankruptcyStage?: string
+  courtCaseNumber?: string
+  debtorAssets?: string
+  legalRisk?: string
+  history: string[]
+}
+
+type View =
+  | { name: 'dashboard' }
+  | { name: 'restructuring' }
+  | { name: 'bankruptcy' }
+  | { name: 'case'; id: number }
+
+const labels = {
+  RESTRUCTURING: 'Реструктуризация',
+  BANKRUPTCY: 'Банкротство',
+  IN_REVIEW: 'На рассмотрении',
+  APPROVED: 'Одобрено',
+  NEEDS_MORE_INFO: 'Нужны документы',
+  ESCALATED: 'Эскалировано',
+  LOW: 'Низкий',
+  MEDIUM: 'Средний',
+  HIGH: 'Высокий',
+}
+
+function App() {
+  const [view, setView] = useState<View>({ name: 'dashboard' })
+  const [cases, setCases] = useState<AssetCase[]>([])
+  const [selectedCase, setSelectedCase] = useState<AssetCase | null>(null)
+  const [moduleFilter, setModuleFilter] = useState('')
+  const [riskFilter, setRiskFilter] = useState('')
+  const [statusFilter, setStatusFilter] = useState('')
+  const [notice, setNotice] = useState('')
+  const [loading, setLoading] = useState(false)
+
+  const loadCases = useCallback(async () => {
+    const params = new URLSearchParams()
+    if (moduleFilter) params.set('module', moduleFilter)
+    if (riskFilter) params.set('riskLevel', riskFilter)
+    if (statusFilter) params.set('status', statusFilter)
+    const response = await fetch(`${API_URL}/cases?${params.toString()}`)
+    if (response.ok) {
+      setCases(await response.json())
+    }
+  }, [moduleFilter, riskFilter, statusFilter])
+
+  async function loadCase(id: number) {
+    const response = await fetch(`${API_URL}/cases/${id}`)
+    if (response.ok) {
+      setSelectedCase(await response.json())
+    }
+  }
+
+  useEffect(() => {
+    void loadCases()
+  }, [loadCases])
+
+  useEffect(() => {
+    if (view.name === 'case') {
+      void loadCase(view.id)
+    }
+  }, [view])
+
+  const stats = useMemo(
+    () => ({
+      total: cases.length,
+      high: cases.filter((item) => item.riskLevel === 'HIGH').length,
+      escalated: cases.filter((item) => item.status === 'ESCALATED').length,
+    }),
+    [cases],
+  )
+
+  async function submitCase(endpoint: string, payload: Record<string, unknown>) {
+    setLoading(true)
+    setNotice('')
+    const response = await fetch(`${API_URL}/${endpoint}`, {
+      method: 'POST',
+      headers: { 'Content-Type': 'application/json' },
+      body: JSON.stringify(payload),
+    })
+    setLoading(false)
+    if (!response.ok) {
+      setNotice('Не удалось создать заявку. Проверьте обязательные поля.')
+      return
+    }
+    const created: AssetCase = await response.json()
+    setNotice(`Заявка #${created.id} создана, риск: ${labels[created.riskLevel]}`)
+    await loadCases()
+    setView({ name: 'case', id: created.id })
+  }
+
+  async function applyDecision(decision: OperatorDecision) {
+    if (!selectedCase) return
+    const response = await fetch(`${API_URL}/cases/${selectedCase.id}/decision`, {
+      method: 'POST',
+      headers: { 'Content-Type': 'application/json' },
+      body: JSON.stringify({ decision, comment: 'Решение принято в рабочем месте MVP' }),
+    })
+    if (response.ok) {
+      const updated = await response.json()
+      setSelectedCase(updated)
+      setNotice('Решение оператора сохранено')
+      await loadCases()
+    }
+  }
+
+  return (
+    <main>
+      <aside className="sidebar">
+        <div className="brand">
+          <span className="brand-mark">AI</span>
+          <div>
+            <strong>AI-PDLC</strong>
+            <span>Проблемные активы</span>
+          </div>
+        </div>
+        <button className={view.name === 'dashboard' ? 'active' : ''} onClick={() => setView({ name: 'dashboard' })}>Обзор</button>
+        <button className={view.name === 'restructuring' ? 'active' : ''} onClick={() => setView({ name: 'restructuring' })}>Реструктуризация</button>
+        <button className={view.name === 'bankruptcy' ? 'active' : ''} onClick={() => setView({ name: 'bankruptcy' })}>Банкротство</button>
+      </aside>
+
+      <section className="workspace">
+        {notice && <div className="notice">{notice}</div>}
+        {view.name === 'dashboard' && (
+          <Dashboard
+            cases={cases}
+            stats={stats}
+            moduleFilter={moduleFilter}
+            riskFilter={riskFilter}
+            statusFilter={statusFilter}
+            onModuleFilter={setModuleFilter}
+            onRiskFilter={setRiskFilter}
+            onStatusFilter={setStatusFilter}
+            onOpen={(id) => setView({ name: 'case', id })}
+          />
+        )}
+        {view.name === 'restructuring' && <RestructuringForm loading={loading} onSubmit={submitCase} />}
+        {view.name === 'bankruptcy' && <BankruptcyForm loading={loading} onSubmit={submitCase} />}
+        {view.name === 'case' && selectedCase && <CaseDetails item={selectedCase} onDecision={applyDecision} />}
+      </section>
+    </main>
+  )
+}
+
+function Dashboard({
+  cases,
+  stats,
+  moduleFilter,
+  riskFilter,
+  statusFilter,
+  onModuleFilter,
+  onRiskFilter,
+  onStatusFilter,
+  onOpen,
+}: {
+  cases: AssetCase[]
+  stats: { total: number; high: number; escalated: number }
+  moduleFilter: string
+  riskFilter: string
+  statusFilter: string
+  onModuleFilter: (value: string) => void
+  onRiskFilter: (value: string) => void
+  onStatusFilter: (value: string) => void
+  onOpen: (id: number) => void
+}) {
+  return (
+    <>
+      <header className="page-header">
+        <div>
+          <h1>Рабочая панель отдела</h1>
+          <p>Очередь заявок, AI-оценка риска и быстрые решения оператора.</p>
+        </div>
+      </header>
+      <div className="metrics">
+        <Metric title="Всего заявок" value={stats.total} />
+        <Metric title="Высокий риск" value={stats.high} />
+        <Metric title="Эскалации" value={stats.escalated} />
+      </div>
+      <div className="filters">
+        <Select value={moduleFilter} onChange={onModuleFilter} label="Модуль" options={[['', 'Все'], ['RESTRUCTURING', 'Реструктуризация'], ['BANKRUPTCY', 'Банкротство']]} />
+        <Select value={riskFilter} onChange={onRiskFilter} label="Риск" options={[['', 'Все'], ['LOW', 'Низкий'], ['MEDIUM', 'Средний'], ['HIGH', 'Высокий']]} />
+        <Select value={statusFilter} onChange={onStatusFilter} label="Статус" options={[['', 'Все'], ['IN_REVIEW', 'На рассмотрении'], ['APPROVED', 'Одобрено'], ['NEEDS_MORE_INFO', 'Нужны документы'], ['ESCALATED', 'Эскалировано']]} />
+      </div>
+      <div className="table-wrap">
+        <table>
+          <thead>
+            <tr>
+              <th>ID</th>
+              <th>Клиент</th>
+              <th>Модуль</th>
+              <th>Долг</th>
+              <th>Риск</th>
+              <th>Статус</th>
+              <th></th>
+            </tr>
+          </thead>
+          <tbody>
+            {cases.map((item) => (
+              <tr key={item.id}>
+                <td>#{item.id}</td>
+                <td>{item.clientName}</td>
+                <td>{labels[item.module]}</td>
+                <td>{formatMoney(item.debtAmount)}</td>
+                <td><span className={`pill ${item.riskLevel.toLowerCase()}`}>{labels[item.riskLevel]}</span></td>
+                <td>{labels[item.status]}</td>
+                <td><button className="ghost" onClick={() => onOpen(item.id)}>Открыть</button></td>
+              </tr>
+            ))}
+            {cases.length === 0 && (
+              <tr>
+                <td colSpan={7} className="empty">Заявок пока нет</td>
+              </tr>
+            )}
+          </tbody>
+        </table>
+      </div>
+    </>
+  )
+}
+
+function RestructuringForm({ loading, onSubmit }: { loading: boolean; onSubmit: (endpoint: string, payload: Record<string, unknown>) => void }) {
+  return (
+    <CaseForm title="Новая реструктуризация" loading={loading} onSubmit={(base, form) => onSubmit('restructuring-cases', {
+      ...base,
+      newPaymentSchedule: value(form, 'newPaymentSchedule'),
+      restructuringTermMonths: numberValue(form, 'restructuringTermMonths'),
+      newInterestRate: numberValue(form, 'newInterestRate'),
+      hardshipReason: value(form, 'hardshipReason'),
+    })}>
+      <Input name="newPaymentSchedule" label="Новый график" required defaultValue="Ежемесячно равными платежами" />
+      <Input name="restructuringTermMonths" label="Срок, мес." type="number" required defaultValue="18" />
+      <Input name="newInterestRate" label="Новая ставка, %" type="number" step="0.1" required defaultValue="11.5" />
+      <TextArea name="hardshipReason" label="Причина ухудшения платежеспособности" required defaultValue="Снижение выручки и временный кассовый разрыв" />
+    </CaseForm>
+  )
+}
+
+function BankruptcyForm({ loading, onSubmit }: { loading: boolean; onSubmit: (endpoint: string, payload: Record<string, unknown>) => void }) {
+  return (
+    <CaseForm title="Новая заявка на банкротство" loading={loading} onSubmit={(base, form) => onSubmit('bankruptcy-cases', {
+      ...base,
+      bankruptcyStage: value(form, 'bankruptcyStage'),
+      courtCaseNumber: value(form, 'courtCaseNumber'),
+      debtorAssets: value(form, 'debtorAssets'),
+      legalRisk: value(form, 'legalRisk'),
+    })}>
+      <Input name="bankruptcyStage" label="Стадия процесса" required defaultValue="Наблюдение" />
+      <Input name="courtCaseNumber" label="Судебное дело" required defaultValue="А40-10001/2026" />
+      <TextArea name="debtorAssets" label="Активы должника" required defaultValue="Складской комплекс, дебиторская задолженность, оборудование" />
+      <TextArea name="legalRisk" label="Юридический риск" required defaultValue="Риск оспаривания сделок и недостаточности конкурсной массы" />
+    </CaseForm>
+  )
+}
+
+function CaseForm({ title, loading, children, onSubmit }: { title: string; loading: boolean; children: ReactNode; onSubmit: (base: Record<string, unknown>, form: HTMLFormElement) => void }) {
+  function handleSubmit(event: FormEvent<HTMLFormElement>) {
+    event.preventDefault()
+    const form = event.currentTarget
+    onSubmit({
+      clientName: value(form, 'clientName'),
+      clientId: value(form, 'clientId'),
+      debtAmount: numberValue(form, 'debtAmount'),
+      overdueDays: numberValue(form, 'overdueDays'),
+      collateral: (form.elements.namedItem('collateral') as HTMLInputElement).checked,
+    }, form)
+  }
+
+  return (
+    <form className="form-panel" onSubmit={handleSubmit}>
+      <h1>{title}</h1>
+      <div className="form-grid">
+        <Input name="clientName" label="Клиент" required defaultValue="ООО Север" />
+        <Input name="clientId" label="ИНН / ID" required defaultValue="7701000011" />
+        <Input name="debtAmount" label="Сумма долга" type="number" required defaultValue="2500000" />
+        <Input name="overdueDays" label="Просрочка, дней" type="number" required defaultValue="75" />
+        <label className="checkbox"><input name="collateral" type="checkbox" defaultChecked /> Есть обеспечение</label>
+        {children}
+      </div>
+      <button className="primary" disabled={loading}>{loading ? 'Создание...' : 'Создать заявку'}</button>
+    </form>
+  )
+}
+
+function CaseDetails({ item, onDecision }: { item: AssetCase; onDecision: (decision: OperatorDecision) => void }) {
+  return (
+    <article className="details">
+      <header className="page-header">
+        <div>
+          <h1>Заявка #{item.id}: {item.clientName}</h1>
+          <p>{labels[item.module]} · {labels[item.status]}</p>
+        </div>
+        <span className={`pill ${item.riskLevel.toLowerCase()}`}>{labels[item.riskLevel]} риск</span>
+      </header>
+      <section className="recommendation">
+        <h2>AI-рекомендация</h2>
+        <p>{item.recommendation}</p>
+      </section>
+      <div className="details-grid">
+        <Info label="ИНН / ID" value={item.clientId} />
+        <Info label="Сумма долга" value={formatMoney(item.debtAmount)} />
+        <Info label="Просрочка" value={`${item.overdueDays} дней`} />
+        <Info label="Обеспечение" value={item.collateral ? 'Да' : 'Нет'} />
+        {item.module === 'RESTRUCTURING' ? (
+          <>
+            <Info label="Новый график" value={item.newPaymentSchedule} />
+            <Info label="Срок" value={`${item.restructuringTermMonths} мес.`} />
+            <Info label="Ставка" value={`${item.newInterestRate}%`} />
+            <Info label="Причина" value={item.hardshipReason} />
+          </>
+        ) : (
+          <>
+            <Info label="Стадия" value={item.bankruptcyStage} />
+            <Info label="Дело" value={item.courtCaseNumber} />
+            <Info label="Активы" value={item.debtorAssets} />
+            <Info label="Юридический риск" value={item.legalRisk} />
+          </>
+        )}
+      </div>
+      <div className="actions">
+        <button className="primary" onClick={() => onDecision('APPROVE')}>Принять</button>
+        <button onClick={() => onDecision('REQUEST_INFO')}>Запросить документы</button>
+        <button onClick={() => onDecision('ESCALATE')}>Эскалировать</button>
+      </div>
+      <section className="history">
+        <h2>История</h2>
+        {item.history.map((event) => <p key={event}>{event}</p>)}
+      </section>
+    </article>
+  )
+}
+
+function Metric({ title, value }: { title: string; value: number }) {
+  return <div className="metric"><span>{title}</span><strong>{value}</strong></div>
+}
+
+function Select({ label, value, options, onChange }: { label: string; value: string; options: string[][]; onChange: (value: string) => void }) {
+  return (
+    <label>
+      {label}
+      <select value={value} onChange={(event) => onChange(event.target.value)}>
+        {options.map(([optionValue, text]) => <option key={optionValue} value={optionValue}>{text}</option>)}
+      </select>
+    </label>
+  )
+}
+
+function Input(props: React.InputHTMLAttributes<HTMLInputElement> & { label: string }) {
+  const { label, ...inputProps } = props
+  return <label>{label}<input {...inputProps} /></label>
+}
+
+function TextArea(props: React.TextareaHTMLAttributes<HTMLTextAreaElement> & { label: string }) {
+  const { label, ...inputProps } = props
+  return <label className="wide">{label}<textarea {...inputProps} /></label>
+}
+
+function Info({ label, value }: { label: string; value?: string | number }) {
+  return <div className="info"><span>{label}</span><strong>{value ?? 'Не указано'}</strong></div>
+}
+
+function value(form: HTMLFormElement, name: string) {
+  return (form.elements.namedItem(name) as HTMLInputElement | HTMLTextAreaElement).value
+}
+
+function numberValue(form: HTMLFormElement, name: string) {
+  return Number(value(form, name))
+}
+
+function formatMoney(value: number) {
+  return new Intl.NumberFormat('ru-RU', { style: 'currency', currency: 'RUB', maximumFractionDigits: 0 }).format(value)
+}
+
+export default App

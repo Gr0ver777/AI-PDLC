@@ -1,0 +1,15 @@
+.npm-cache/
+.venv/
+.python-packages/
+.allure-plugin/
+.pw-browsers/
+__pycache__/
+*.pyc
+backend.zip
+backend/data/
+backend/build/
+frontend/node_modules/
+frontend/dist/
+tests/allure-results/
+*.log
+*.err
