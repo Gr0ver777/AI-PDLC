@@ -33,6 +33,12 @@ The repair step grants the current Windows user `Modify` permissions on `.git`.
 .\scripts\pdlc_flow.ps1
 ```
 
+Run the SLA indicators flow:
+
+```powershell
+powershell -NoProfile -ExecutionPolicy Bypass -File .\scripts\pdlc_flow.ps1 -Profile sla-indicators
+```
+
 To skip remote operations:
 
 ```powershell
@@ -58,10 +64,10 @@ If `GITHUB_TOKEN` is not set or GitHub returns `403 Resource not accessible by p
 If `.git` ACL cannot be repaired from the current sandbox, run:
 
 ```powershell
-powershell -NoProfile -ExecutionPolicy Bypass -File .\scripts\pdlc_flow.ps1 -UseIsolatedGitWorkspace
+powershell -NoProfile -ExecutionPolicy Bypass -File .\scripts\pdlc_flow.ps1 -Profile sla-indicators -UseIsolatedGitWorkspace
 ```
 
-The runner copies the project into `.pdlc-run/worktree`, excludes local caches and browsers, creates a clean Git repository there, commits each PDLC stage, pushes `codex/pdlc-client-support-plan`, and creates or prints the PR link.
+The runner copies the project into `.pdlc-run/worktree`, excludes local caches and browsers, creates a clean Git repository there, commits each PDLC stage, pushes the profile feature branch, and creates or prints the PR link.
 
 In isolated mode, lint/build/UI tests run in the original workspace first. The isolated workspace is used only for Git commit, push, and PR operations.
 
