@@ -9,6 +9,14 @@ type CaseStatus = 'IN_REVIEW' | 'APPROVED' | 'NEEDS_MORE_INFO' | 'ESCALATED'
 type RiskLevel = 'LOW' | 'MEDIUM' | 'HIGH'
 type OperatorDecision = 'APPROVE' | 'REQUEST_INFO' | 'ESCALATE'
 
+type SupportPlan = {
+  nextContactDate: string
+  relationshipManager: string
+  contactChannel: string
+  documentPackageStatus: string
+  supportComment: string
+}
+
 type AssetCase = {
   id: number
   clientName: string
@@ -22,6 +30,7 @@ type AssetCase = {
   priority: 'NORMAL' | 'URGENT' | 'CRITICAL'
   recommendation: string
   createdAt: string
+  supportPlan?: SupportPlan
   newPaymentSchedule?: string
   restructuringTermMonths?: number
   newInterestRate?: number
@@ -55,11 +64,20 @@ function App() {
   const [view, setView] = useState<View>({ name: 'dashboard' })
   const [cases, setCases] = useState<AssetCase[]>([])
   const [selectedCase, setSelectedCase] = useState<AssetCase | null>(null)
+  const [supportPlans, setSupportPlans] = useState<Record<number, SupportPlan>>({})
   const [moduleFilter, setModuleFilter] = useState('')
   const [riskFilter, setRiskFilter] = useState('')
   const [statusFilter, setStatusFilter] = useState('')
   const [notice, setNotice] = useState('')
   const [loading, setLoading] = useState(false)
+
+  const enrichCase = useCallback(
+    (item: AssetCase): AssetCase => ({
+      ...item,
+      supportPlan: supportPlans[item.id] ?? item.supportPlan,
+    }),
+    [supportPlans],
+  )
 
   const loadCases = useCallback(async () => {
     const params = new URLSearchParams()
@@ -68,16 +86,18 @@ function App() {
     if (statusFilter) params.set('status', statusFilter)
     const response = await fetch(`${API_URL}/cases?${params.toString()}`)
     if (response.ok) {
-      setCases(await response.json())
+      const loadedCases: AssetCase[] = await response.json()
+      setCases(loadedCases.map(enrichCase))
     }
-  }, [moduleFilter, riskFilter, statusFilter])
+  }, [enrichCase, moduleFilter, riskFilter, statusFilter])
 
-  async function loadCase(id: number) {
+  const loadCase = useCallback(async (id: number) => {
     const response = await fetch(`${API_URL}/cases/${id}`)
     if (response.ok) {
-      setSelectedCase(await response.json())
+      const loadedCase: AssetCase = await response.json()
+      setSelectedCase(enrichCase(loadedCase))
     }
-  }
+  }, [enrichCase])
 
   useEffect(() => {
     void loadCases()
@@ -87,7 +107,7 @@ function App() {
     if (view.name === 'case') {
       void loadCase(view.id)
     }
-  }, [view])
+  }, [loadCase, supportPlans, view])
 
   const stats = useMemo(
     () => ({
@@ -98,7 +118,7 @@ function App() {
     [cases],
   )
 
-  async function submitCase(endpoint: string, payload: Record<string, unknown>) {
+  async function submitCase(endpoint: string, payload: Record<string, unknown>, supportPlan?: SupportPlan) {
     setLoading(true)
     setNotice('')
     const response = await fetch(`${API_URL}/${endpoint}`, {
@@ -112,8 +132,13 @@ function App() {
       return
     }
     const created: AssetCase = await response.json()
+    if (supportPlan) {
+      setSupportPlans((current) => ({ ...current, [created.id]: supportPlan }))
+      created.supportPlan = supportPlan
+    }
     setNotice(`Заявка #${created.id} создана, риск: ${labels[created.riskLevel]}`)
     await loadCases()
+    setSelectedCase(created)
     setView({ name: 'case', id: created.id })
   }
 
@@ -125,8 +150,8 @@ function App() {
       body: JSON.stringify({ decision, comment: 'Решение принято в рабочем месте MVP' }),
     })
     if (response.ok) {
-      const updated = await response.json()
-      setSelectedCase(updated)
+      const updated: AssetCase = await response.json()
+      setSelectedCase(enrichCase(updated))
       setNotice('Решение оператора сохранено')
       await loadCases()
     }
@@ -246,7 +271,7 @@ function Dashboard({
   )
 }
 
-function RestructuringForm({ loading, onSubmit }: { loading: boolean; onSubmit: (endpoint: string, payload: Record<string, unknown>) => void }) {
+function RestructuringForm({ loading, onSubmit }: { loading: boolean; onSubmit: (endpoint: string, payload: Record<string, unknown>, supportPlan?: SupportPlan) => void }) {
   return (
     <CaseForm title="Новая реструктуризация" loading={loading} onSubmit={(base, form) => onSubmit('restructuring-cases', {
       ...base,
@@ -254,11 +279,12 @@ function RestructuringForm({ loading, onSubmit }: { loading: boolean; onSubmit: 
       restructuringTermMonths: numberValue(form, 'restructuringTermMonths'),
       newInterestRate: numberValue(form, 'newInterestRate'),
       hardshipReason: value(form, 'hardshipReason'),
-    })}>
+    }, supportPlanFrom(form))}>
       <Input name="newPaymentSchedule" label="Новый график" required defaultValue="Ежемесячно равными платежами" />
       <Input name="restructuringTermMonths" label="Срок, мес." type="number" required defaultValue="18" />
       <Input name="newInterestRate" label="Новая ставка, %" type="number" step="0.1" required defaultValue="11.5" />
       <TextArea name="hardshipReason" label="Причина ухудшения платежеспособности" required defaultValue="Снижение выручки и временный кассовый разрыв" />
+      <SupportPlanFields />
     </CaseForm>
   )
 }
@@ -309,6 +335,19 @@ function CaseForm({ title, loading, children, onSubmit }: { title: string; loadi
   )
 }
 
+function SupportPlanFields() {
+  return (
+    <fieldset className="support-plan">
+      <legend>План сопровождения клиента</legend>
+      <Input name="nextContactDate" label="Дата следующего контакта" type="date" required defaultValue="2026-06-01" />
+      <Input name="relationshipManager" label="Ответственный менеджер" required defaultValue="Иван Петров" />
+      <SelectInput name="contactChannel" label="Канал связи" required defaultValue="Телефон" options={['Телефон', 'Email', 'Встреча', 'Мессенджер']} />
+      <SelectInput name="documentPackageStatus" label="Статус пакета документов" required defaultValue="Запрошен" options={['Не запрошен', 'Запрошен', 'Получен частично', 'Получен полностью']} />
+      <TextArea name="supportComment" label="Комментарий по сопровождению" defaultValue="Согласовать дату звонка и проверить комплектность документов" />
+    </fieldset>
+  )
+}
+
 function CaseDetails({ item, onDecision }: { item: AssetCase; onDecision: (decision: OperatorDecision) => void }) {
   return (
     <article className="details">
@@ -344,6 +383,18 @@ function CaseDetails({ item, onDecision }: { item: AssetCase; onDecision: (decis
           </>
         )}
       </div>
+      {item.supportPlan && (
+        <section className="recommendation support-summary">
+          <h2>План сопровождения клиента</h2>
+          <div className="details-grid compact">
+            <Info label="Следующий контакт" value={formatDate(item.supportPlan.nextContactDate)} />
+            <Info label="Ответственный" value={item.supportPlan.relationshipManager} />
+            <Info label="Канал связи" value={item.supportPlan.contactChannel} />
+            <Info label="Документы" value={item.supportPlan.documentPackageStatus} />
+            <Info label="Комментарий" value={item.supportPlan.supportComment || 'Не указан'} />
+          </div>
+        </section>
+      )}
       <div className="actions">
         <button className="primary" onClick={() => onDecision('APPROVE')}>Принять</button>
         <button onClick={() => onDecision('REQUEST_INFO')}>Запросить документы</button>
@@ -372,6 +423,18 @@ function Select({ label, value, options, onChange }: { label: string; value: str
   )
 }
 
+function SelectInput(props: React.SelectHTMLAttributes<HTMLSelectElement> & { label: string; options: string[] }) {
+  const { label, options, ...selectProps } = props
+  return (
+    <label>
+      {label}
+      <select {...selectProps}>
+        {options.map((option) => <option key={option} value={option}>{option}</option>)}
+      </select>
+    </label>
+  )
+}
+
 function Input(props: React.InputHTMLAttributes<HTMLInputElement> & { label: string }) {
   const { label, ...inputProps } = props
   return <label>{label}<input {...inputProps} /></label>
@@ -387,15 +450,29 @@ function Info({ label, value }: { label: string; value?: string | number }) {
 }
 
 function value(form: HTMLFormElement, name: string) {
-  return (form.elements.namedItem(name) as HTMLInputElement | HTMLTextAreaElement).value
+  return (form.elements.namedItem(name) as HTMLInputElement | HTMLTextAreaElement | HTMLSelectElement).value
 }
 
 function numberValue(form: HTMLFormElement, name: string) {
   return Number(value(form, name))
 }
 
+function supportPlanFrom(form: HTMLFormElement): SupportPlan {
+  return {
+    nextContactDate: value(form, 'nextContactDate'),
+    relationshipManager: value(form, 'relationshipManager'),
+    contactChannel: value(form, 'contactChannel'),
+    documentPackageStatus: value(form, 'documentPackageStatus'),
+    supportComment: value(form, 'supportComment'),
+  }
+}
+
 function formatMoney(value: number) {
   return new Intl.NumberFormat('ru-RU', { style: 'currency', currency: 'RUB', maximumFractionDigits: 0 }).format(value)
+}
+
+function formatDate(value: string) {
+  return new Intl.DateTimeFormat('ru-RU').format(new Date(value))
 }
 
 export default App

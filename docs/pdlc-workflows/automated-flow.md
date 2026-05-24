@@ -1,0 +1,76 @@
+# Automated PDLC Flow
+
+## Purpose
+
+`scripts/pdlc_flow.ps1` runs the local PDLC delivery flow:
+
+1. Git preflight.
+2. Frontend lint/build.
+3. UI tests with Playwright route mocking.
+4. Stage-specific commits.
+5. Push feature branch.
+6. Create a pull request when `GITHUB_TOKEN` is available.
+
+## Git Permission Repair
+
+If Git fails with `Unable to create .git/index.lock: Permission denied`, run from the repository root:
+
+```powershell
+.\scripts\pdlc_flow.ps1 -RepairGitAcl -DryRun
+```
+
+If dry-run shows the intended commands, run:
+
+```powershell
+.\scripts\pdlc_flow.ps1 -RepairGitAcl -SkipPush -SkipPr
+```
+
+The repair step grants the current Windows user `Modify` permissions on `.git`.
+
+## Full Flow
+
+```powershell
+.\scripts\pdlc_flow.ps1
+```
+
+To skip remote operations:
+
+```powershell
+.\scripts\pdlc_flow.ps1 -SkipPush -SkipPr
+```
+
+To create a PR automatically, set:
+
+```powershell
+$env:GITHUB_TOKEN = "<token-with-repo-scope>"
+.\scripts\pdlc_flow.ps1
+```
+
+If `GITHUB_TOKEN` is not set, the script prints the GitHub compare URL after push.
+
+## Fallback: Isolated Git Workspace
+
+If `.git` ACL cannot be repaired from the current sandbox, run:
+
+```powershell
+powershell -NoProfile -ExecutionPolicy Bypass -File .\scripts\pdlc_flow.ps1 -UseIsolatedGitWorkspace
+```
+
+The runner copies the project into `.pdlc-run/worktree`, excludes local caches and browsers, creates a clean Git repository there, commits each PDLC stage, pushes `codex/pdlc-client-support-plan`, and creates or prints the PR link.
+
+In isolated mode, lint/build/UI tests run in the original workspace first. The isolated workspace is used only for Git commit, push, and PR operations.
+
+## Guardrails
+
+The runner fails if Git tracks generated or heavy local artifacts:
+
+- `.pw-browsers`
+- `.venv`
+- `.npm-cache`
+- `.python-packages`
+- `.allure-plugin`
+- `node_modules`
+- `__pycache__`
+- `*.pyc`
+- `dist`
+- `allure-results`
