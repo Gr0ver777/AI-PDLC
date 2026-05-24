@@ -250,6 +250,23 @@ button:disabled {
   grid-column: 1 / -1;
 }
 
+.support-plan {
+  grid-column: 1 / -1;
+  display: grid;
+  grid-template-columns: repeat(2, minmax(220px, 1fr));
+  gap: 14px;
+  border: 1px solid #dfe6ea;
+  border-radius: 8px;
+  padding: 16px;
+  margin: 4px 0 0;
+}
+
+.support-plan legend {
+  padding: 0 8px;
+  color: #24343d;
+  font-weight: 750;
+}
+
 .checkbox {
   display: flex;
   align-items: center;
@@ -263,6 +280,10 @@ button:disabled {
 .details {
   display: grid;
   gap: 16px;
+}
+
+.details-grid.compact {
+  margin-bottom: 0;
 }
 
 .info {
@@ -302,7 +323,8 @@ button:disabled {
   .metrics,
   .filters,
   .form-grid,
-  .details-grid {
+  .details-grid,
+  .support-plan {
     grid-template-columns: 1fr;
   }
 
