@@ -17,6 +17,13 @@ type SupportPlan = {
   supportComment: string
 }
 
+type SlaPlan = {
+  processingDeadline: string
+  urgency: string
+  slaComment: string
+  slaStatus: string
+}
+
 type AssetCase = {
   id: number
   clientName: string
@@ -31,6 +38,7 @@ type AssetCase = {
   recommendation: string
   createdAt: string
   supportPlan?: SupportPlan
+  slaPlan?: SlaPlan
   newPaymentSchedule?: string
   restructuringTermMonths?: number
   newInterestRate?: number
@@ -65,6 +73,7 @@ function App() {
   const [cases, setCases] = useState<AssetCase[]>([])
   const [selectedCase, setSelectedCase] = useState<AssetCase | null>(null)
   const [supportPlans, setSupportPlans] = useState<Record<number, SupportPlan>>({})
+  const [slaPlans, setSlaPlans] = useState<Record<number, SlaPlan>>({})
   const [moduleFilter, setModuleFilter] = useState('')
   const [riskFilter, setRiskFilter] = useState('')
   const [statusFilter, setStatusFilter] = useState('')
@@ -75,8 +84,9 @@ function App() {
     (item: AssetCase): AssetCase => ({
       ...item,
       supportPlan: supportPlans[item.id] ?? item.supportPlan,
+      slaPlan: slaPlans[item.id] ?? item.slaPlan,
     }),
-    [supportPlans],
+    [slaPlans, supportPlans],
   )
 
   const loadCases = useCallback(async () => {
@@ -107,7 +117,7 @@ function App() {
     if (view.name === 'case') {
       void loadCase(view.id)
     }
-  }, [loadCase, supportPlans, view])
+  }, [loadCase, slaPlans, supportPlans, view])
 
   const stats = useMemo(
     () => ({
@@ -118,7 +128,7 @@ function App() {
     [cases],
   )
 
-  async function submitCase(endpoint: string, payload: Record<string, unknown>, supportPlan?: SupportPlan) {
+  async function submitCase(endpoint: string, payload: Record<string, unknown>, supportPlan?: SupportPlan, slaPlan?: SlaPlan) {
     setLoading(true)
     setNotice('')
     const response = await fetch(`${API_URL}/${endpoint}`, {
@@ -135,6 +145,10 @@ function App() {
     if (supportPlan) {
       setSupportPlans((current) => ({ ...current, [created.id]: supportPlan }))
       created.supportPlan = supportPlan
+    }
+    if (slaPlan) {
+      setSlaPlans((current) => ({ ...current, [created.id]: slaPlan }))
+      created.slaPlan = slaPlan
     }
     setNotice(`Заявка #${created.id} создана, риск: ${labels[created.riskLevel]}`)
     await loadCases()
@@ -271,7 +285,7 @@ function Dashboard({
   )
 }
 
-function RestructuringForm({ loading, onSubmit }: { loading: boolean; onSubmit: (endpoint: string, payload: Record<string, unknown>, supportPlan?: SupportPlan) => void }) {
+function RestructuringForm({ loading, onSubmit }: { loading: boolean; onSubmit: (endpoint: string, payload: Record<string, unknown>, supportPlan?: SupportPlan, slaPlan?: SlaPlan) => void }) {
   return (
     <CaseForm title="Новая реструктуризация" loading={loading} onSubmit={(base, form) => onSubmit('restructuring-cases', {
       ...base,
@@ -279,12 +293,13 @@ function RestructuringForm({ loading, onSubmit }: { loading: boolean; onSubmit: 
       restructuringTermMonths: numberValue(form, 'restructuringTermMonths'),
       newInterestRate: numberValue(form, 'newInterestRate'),
       hardshipReason: value(form, 'hardshipReason'),
-    }, supportPlanFrom(form))}>
+    }, supportPlanFrom(form), slaPlanFrom(form))}>
       <Input name="newPaymentSchedule" label="Новый график" required defaultValue="Ежемесячно равными платежами" />
       <Input name="restructuringTermMonths" label="Срок, мес." type="number" required defaultValue="18" />
       <Input name="newInterestRate" label="Новая ставка, %" type="number" step="0.1" required defaultValue="11.5" />
       <TextArea name="hardshipReason" label="Причина ухудшения платежеспособности" required defaultValue="Снижение выручки и временный кассовый разрыв" />
       <SupportPlanFields />
+      <SlaPlanFields />
     </CaseForm>
   )
 }
@@ -348,6 +363,31 @@ function SupportPlanFields() {
   )
 }
 
+function SlaPlanFields() {
+  const defaultDeadline = '2026-05-26'
+  const [deadline, setDeadline] = useState(defaultDeadline)
+
+  return (
+    <fieldset className="support-plan sla-plan">
+      <legend>SLA обработки</legend>
+      <Input
+        name="processingDeadline"
+        label="Дедлайн обработки"
+        type="date"
+        required
+        defaultValue={defaultDeadline}
+        onChange={(event) => setDeadline(event.target.value)}
+      />
+      <SelectInput name="urgency" label="Срочность" required defaultValue="Повышенная" options={['Стандартная', 'Повышенная', 'Критическая']} />
+      <TextArea name="slaComment" label="Комментарий по SLA" defaultValue="Проконтролировать контакт до дедлайна" />
+      <div className="sla-status" aria-live="polite">
+        <span>SLA-статус</span>
+        <strong>{calculateSlaStatus(deadline)}</strong>
+      </div>
+    </fieldset>
+  )
+}
+
 function CaseDetails({ item, onDecision }: { item: AssetCase; onDecision: (decision: OperatorDecision) => void }) {
   return (
     <article className="details">
@@ -392,6 +432,17 @@ function CaseDetails({ item, onDecision }: { item: AssetCase; onDecision: (decis
             <Info label="Канал связи" value={item.supportPlan.contactChannel} />
             <Info label="Документы" value={item.supportPlan.documentPackageStatus} />
             <Info label="Комментарий" value={item.supportPlan.supportComment || 'Не указан'} />
+          </div>
+        </section>
+      )}
+      {item.slaPlan && (
+        <section className="recommendation support-summary">
+          <h2>SLA обработки</h2>
+          <div className="details-grid compact">
+            <Info label="Дедлайн" value={formatDate(item.slaPlan.processingDeadline)} />
+            <Info label="Срочность" value={item.slaPlan.urgency} />
+            <Info label="SLA-статус" value={item.slaPlan.slaStatus} />
+            <Info label="Комментарий" value={item.slaPlan.slaComment || 'Не указан'} />
           </div>
         </section>
       )}
@@ -467,12 +518,40 @@ function supportPlanFrom(form: HTMLFormElement): SupportPlan {
   }
 }
 
+function slaPlanFrom(form: HTMLFormElement): SlaPlan {
+  const processingDeadline = value(form, 'processingDeadline')
+  return {
+    processingDeadline,
+    urgency: value(form, 'urgency'),
+    slaComment: value(form, 'slaComment'),
+    slaStatus: calculateSlaStatus(processingDeadline),
+  }
+}
+
 function formatMoney(value: number) {
   return new Intl.NumberFormat('ru-RU', { style: 'currency', currency: 'RUB', maximumFractionDigits: 0 }).format(value)
 }
 
 function formatDate(value: string) {
   return new Intl.DateTimeFormat('ru-RU').format(new Date(value))
+}
+
+function calculateSlaStatus(deadline: string) {
+  if (!deadline) {
+    return 'Не задан'
+  }
+  const today = new Date()
+  today.setHours(0, 0, 0, 0)
+  const deadlineDate = new Date(deadline)
+  deadlineDate.setHours(0, 0, 0, 0)
+  const diffDays = Math.ceil((deadlineDate.getTime() - today.getTime()) / 86_400_000)
+  if (diffDays <= 0) {
+    return 'Критично'
+  }
+  if (diffDays <= 3) {
+    return 'Под контролем'
+  }
+  return 'В срок'
 }
 
 export default App
