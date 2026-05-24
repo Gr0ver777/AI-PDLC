@@ -46,7 +46,12 @@ $env:GITHUB_TOKEN = "<token-with-repo-scope>"
 .\scripts\pdlc_flow.ps1
 ```
 
-If `GITHUB_TOKEN` is not set, the script prints the GitHub compare URL after push.
+For a fine-grained GitHub token, grant access to the target repository and enable:
+
+- `Contents`: read and write
+- `Pull requests`: read and write
+
+If `GITHUB_TOKEN` is not set or GitHub returns `403 Resource not accessible by personal access token`, the script prints the GitHub compare URL after push and does not fail the completed PDLC flow.
 
 ## Fallback: Isolated Git Workspace
 
