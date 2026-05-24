@@ -29,6 +29,10 @@ The repair step grants the current Windows user `Modify` permissions on `.git`.
 
 ## Full Flow
 
+Every new product feature must start from a dedicated feature branch created from the current `main`.
+Do not run PDLC delivery commits directly in `main`, `dev`, or another already shared feature branch.
+Use the naming pattern `codex/pdlc-<feature-slug>` unless the team agrees on another explicit branch name.
+
 ```powershell
 .\scripts\pdlc_flow.ps1
 ```

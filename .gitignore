@@ -2,7 +2,9 @@
 .venv/
 .python-packages/
 .allure-plugin/
+.pdlc-run/
 .pw-browsers/
+tools/
 __pycache__/
 *.pyc
 backend.zip

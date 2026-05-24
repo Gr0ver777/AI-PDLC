@@ -94,18 +94,30 @@ function App() {
     if (moduleFilter) params.set('module', moduleFilter)
     if (riskFilter) params.set('riskLevel', riskFilter)
     if (statusFilter) params.set('status', statusFilter)
-    const response = await fetch(`${API_URL}/cases?${params.toString()}`)
-    if (response.ok) {
-      const loadedCases: AssetCase[] = await response.json()
-      setCases(loadedCases.map(enrichCase))
+    try {
+      const response = await fetch(`${API_URL}/cases?${params.toString()}`)
+      if (response.ok) {
+        const loadedCases: AssetCase[] = await response.json()
+        setCases(loadedCases.map(enrichCase))
+        return
+      }
+      setNotice('Не удалось загрузить список заявок. Проверьте backend.')
+    } catch {
+      setNotice('Backend недоступен. Проверьте, что Spring Boot запущен на порту 8080.')
     }
   }, [enrichCase, moduleFilter, riskFilter, statusFilter])
 
   const loadCase = useCallback(async (id: number) => {
-    const response = await fetch(`${API_URL}/cases/${id}`)
-    if (response.ok) {
-      const loadedCase: AssetCase = await response.json()
-      setSelectedCase(enrichCase(loadedCase))
+    try {
+      const response = await fetch(`${API_URL}/cases/${id}`)
+      if (response.ok) {
+        const loadedCase: AssetCase = await response.json()
+        setSelectedCase(enrichCase(loadedCase))
+        return
+      }
+      setNotice(`Не удалось загрузить заявку #${id}.`)
+    } catch {
+      setNotice('Backend недоступен. Проверьте, что Spring Boot запущен на порту 8080.')
     }
   }, [enrichCase])
 
@@ -131,29 +143,34 @@ function App() {
   async function submitCase(endpoint: string, payload: Record<string, unknown>, supportPlan?: SupportPlan, slaPlan?: SlaPlan) {
     setLoading(true)
     setNotice('')
-    const response = await fetch(`${API_URL}/${endpoint}`, {
-      method: 'POST',
-      headers: { 'Content-Type': 'application/json' },
-      body: JSON.stringify(payload),
-    })
-    setLoading(false)
-    if (!response.ok) {
-      setNotice('Не удалось создать заявку. Проверьте обязательные поля.')
-      return
+    try {
+      const response = await fetch(`${API_URL}/${endpoint}`, {
+        method: 'POST',
+        headers: { 'Content-Type': 'application/json' },
+        body: JSON.stringify(payload),
+      })
+      if (!response.ok) {
+        setNotice('Не удалось создать заявку. Проверьте обязательные поля.')
+        return
+      }
+      const created: AssetCase = await response.json()
+      if (supportPlan) {
+        setSupportPlans((current) => ({ ...current, [created.id]: supportPlan }))
+        created.supportPlan = supportPlan
+      }
+      if (slaPlan) {
+        setSlaPlans((current) => ({ ...current, [created.id]: slaPlan }))
+        created.slaPlan = slaPlan
+      }
+      setNotice(`Заявка #${created.id} создана, риск: ${labels[created.riskLevel]}`)
+      await loadCases()
+      setSelectedCase(created)
+      setView({ name: 'case', id: created.id })
+    } catch {
+      setNotice('Backend недоступен или вернул сетевую ошибку. Проверьте Spring Boot и PostgreSQL.')
+    } finally {
+      setLoading(false)
     }
-    const created: AssetCase = await response.json()
-    if (supportPlan) {
-      setSupportPlans((current) => ({ ...current, [created.id]: supportPlan }))
-      created.supportPlan = supportPlan
-    }
-    if (slaPlan) {
-      setSlaPlans((current) => ({ ...current, [created.id]: slaPlan }))
-      created.slaPlan = slaPlan
-    }
-    setNotice(`Заявка #${created.id} создана, риск: ${labels[created.riskLevel]}`)
-    await loadCases()
-    setSelectedCase(created)
-    setView({ name: 'case', id: created.id })
   }
 
   async function applyDecision(decision: OperatorDecision) {
