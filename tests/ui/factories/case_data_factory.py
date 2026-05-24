@@ -2,6 +2,15 @@ from dataclasses import dataclass
 
 
 @dataclass(frozen=True)
+class SupportPlanData:
+    next_contact_date: str = "2026-06-01"
+    relationship_manager: str = "Иван Петров"
+    contact_channel: str = "Телефон"
+    document_package_status: str = "Запрошен"
+    support_comment: str = "Согласовать дату звонка и проверить комплектность документов"
+
+
+@dataclass(frozen=True)
 class RestructuringData:
     client_name: str = "ООО Автотест Реструктуризация"
     client_id: str = "7701999001"
@@ -11,6 +20,7 @@ class RestructuringData:
     term_months: str = "18"
     new_interest_rate: str = "11.5"
     hardship_reason: str = "Снижение выручки"
+    support_plan: SupportPlanData = SupportPlanData()
 
 
 @dataclass(frozen=True)
